@@ -1,48 +1,40 @@
-use crate::{lexer, value};
+use crate::{
+    lexer::{LexError, Token, TokenIterator},
+    value::Value,
+};
 
 #[derive(Debug)]
 pub enum AstError {
-    LexError(lexer::LexError),
+    LexError(LexError),
     UnexpectedEnd,
     UnexpectedToken(String),
 }
 
 #[derive(Debug)]
 enum Expression {
-    StaticValue(value::Value),
-}
-
-#[derive(Debug)]
-struct SExprNode {
-    car: String,
-    cdr: Vec<Box<SExprNode>>,
-}
-
-#[derive(Debug)]
-struct Definition {
-    identifier: String,
-    expression: Expression,
+    Empty,
+    Call(String, Vec<Expression>),
+    Definition(String, Box<Expression>),
+    StaticValue(Value),
 }
 
 #[derive(Debug)]
 pub struct Ast {
-    definitions: Vec<Definition>,
+    exprs: Vec<Expression>,
 }
 
 impl Ast {
     fn new() -> Self {
-        Self {
-            definitions: vec![],
-        }
+        Self { exprs: vec![] }
     }
 }
 
 pub struct AstBuilder<'a> {
-    tokens: lexer::TokenIterator<'a>,
+    tokens: TokenIterator<'a>,
 }
 
 impl<'a> AstBuilder<'a> {
-    pub fn new(tokens: lexer::TokenIterator<'a>) -> Self {
+    pub fn new(tokens: TokenIterator<'a>) -> Self {
         Self { tokens }
     }
 
@@ -51,12 +43,11 @@ impl<'a> AstBuilder<'a> {
         loop {
             match self.tokens.next() {
                 Some(Ok(token)) => match token {
-                    lexer::Token::Open => {
+                    Token::Open => {
                         let tokens = self.read_until_matching_close()?;
-                        let definition = parse_tokens(tokens)?;
-                        ast.definitions.push(definition)
+                        ast.exprs.push(parse_expression(&tokens)?)
                     }
-                    lexer::Token::Close => return Err(AstError::UnexpectedToken(")".to_string())),
+                    Token::Close => return Err(AstError::UnexpectedToken(")".to_string())),
                     _ => unimplemented!(),
                 },
                 Some(Err(lex_error)) => return Err(AstError::LexError(lex_error)),
@@ -65,25 +56,25 @@ impl<'a> AstBuilder<'a> {
         }
     }
 
-    fn read_until_matching_close(&mut self) -> Result<Vec<lexer::Token<'a>>, AstError> {
+    fn read_until_matching_close(&mut self) -> Result<Vec<Token<'a>>, AstError> {
         let mut depth = 0;
-        let mut buffer = vec![];
+        let mut buffer = vec![Token::Open];
         loop {
             match self.tokens.next() {
                 Some(Ok(token)) => match token {
-                    lexer::Token::Open => {
+                    Token::Open => {
                         depth += 1;
                         buffer.push(token);
                     }
-                    lexer::Token::Close => {
+                    Token::Close => {
+                        buffer.push(token);
                         if depth == 0 {
                             return Ok(buffer);
                         } else {
                             depth -= 1;
-                            buffer.push(token);
                         }
                     }
-                    lexer::Token::Whitespace => {}
+                    Token::Whitespace => {}
                     _ => buffer.push(token),
                 },
                 Some(Err(lex_error)) => return Err(AstError::LexError(lex_error)),
@@ -93,27 +84,58 @@ impl<'a> AstBuilder<'a> {
     }
 }
 
-fn parse_tokens<'a>(tokens: Vec<lexer::Token<'a>>) -> Result<Definition, AstError> {
+fn parse_expression<'a>(tokens: &[Token<'a>]) -> Result<Expression, AstError> {
     match &tokens[..] {
-        [lexer::Token::Identifier("define"), lexer::Token::Identifier(ident), expr] => {
-            Ok(Definition {
-                identifier: ident.to_string(),
-                expression: parse_expression(expr)?,
-            })
+        [Token::Boolean(bool)] => Ok(Expression::StaticValue(Value::Boolean(*bool))),
+        [Token::Integer(number)] => Ok(Expression::StaticValue(Value::Number(*number))),
+        [Token::Open, Token::Close] => Ok(Expression::Empty),
+        [Token::Open, Token::Identifier("define"), Token::Identifier(ident), .., Token::Close] => {
+            Ok(Expression::Definition(
+                ident.to_string(),
+                Box::new(parse_expression(&tokens[3..tokens.len() - 1])?),
+            ))
         }
+        [Token::Open, Token::Identifier(operator), .., Token::Close] => Ok(Expression::Call(
+            operator.to_string(),
+            parse_expressions(&tokens[2..tokens.len() - 1])?,
+        )),
         _ => {
-            println!("parse tokens unimplemented: {:?}", tokens);
+            println!("parse expression unimplemented: {:?}", tokens);
             unimplemented!()
         }
     }
 }
 
-fn parse_expression<'a>(token: &lexer::Token<'a>) -> Result<Expression, AstError> {
-    match token {
-        lexer::Token::Integer(number) => Ok(Expression::StaticValue(value::Value::Number(*number))),
-        _ => {
-            println!("parse expr unimplemented: {:?}", token);
-            unimplemented!()
+fn parse_expressions<'a>(tokens: &[Token<'a>]) -> Result<Vec<Expression>, AstError> {
+    let mut expressions = vec![];
+    for i in 0..tokens.len() {
+        match &tokens[i] {
+            Token::Open => expressions.push(parse_expression(
+                &tokens[i..index_of_matching_close(&tokens[i..])? + 1],
+            )?),
+            Token::Close => return Err(AstError::UnexpectedEnd),
+            _ => expressions.push(parse_expression(&tokens[i..i + 1])?),
         }
     }
+    Ok(expressions)
+}
+
+fn index_of_matching_close<'a>(tokens: &[Token<'a>]) -> Result<usize, AstError> {
+    let mut depth = 0;
+    for (idx, token) in tokens.iter().enumerate() {
+        match token {
+            Token::Open => {
+                depth += 1;
+            }
+            Token::Close => {
+                if depth == 0 {
+                    return Ok(idx);
+                } else {
+                    depth -= 1;
+                }
+            }
+            _ => continue,
+        }
+    }
+    Err(AstError::UnexpectedEnd)
 }
