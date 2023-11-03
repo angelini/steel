@@ -82,6 +82,7 @@ impl<'a> TokenIterator<'a> {
         } else {
             if let Some(line) = self.lines.next() {
                 self.location.line += 1;
+                self.location.column = 0;
                 self.line = line;
                 self.chars = line.chars().peekable();
                 self.next_char()

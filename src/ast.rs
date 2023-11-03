@@ -1,3 +1,5 @@
+use std::{slice::Iter, vec::IntoIter};
+
 use crate::{
     lexer::{LexError, Token, TokenIterator},
     value::Value,
@@ -11,11 +13,12 @@ pub enum AstError {
 }
 
 #[derive(Debug)]
-enum Expression {
+pub enum Expression {
     Empty,
     Call(String, Vec<Expression>),
     Definition(String, Box<Expression>),
     StaticValue(Value),
+    Variable(String),
 }
 
 #[derive(Debug)]
@@ -26,6 +29,14 @@ pub struct Ast {
 impl Ast {
     fn new() -> Self {
         Self { exprs: vec![] }
+    }
+
+    pub fn iter(&self) -> Iter<Expression> {
+        self.exprs.iter()
+    }
+
+    pub fn into_iter(self) -> IntoIter<Expression> {
+        self.exprs.into_iter()
     }
 }
 
@@ -48,7 +59,11 @@ impl<'a> AstBuilder<'a> {
                         ast.exprs.push(parse_expression(&tokens)?)
                     }
                     Token::Close => return Err(AstError::UnexpectedToken(")".to_string())),
-                    _ => unimplemented!(),
+                    Token::Whitespace => continue,
+                    _ => {
+                        println!("ast build token not implemented: {:?}", token);
+                        unimplemented!()
+                    }
                 },
                 Some(Err(lex_error)) => return Err(AstError::LexError(lex_error)),
                 None => return Ok(ast),
@@ -88,6 +103,7 @@ fn parse_expression<'a>(tokens: &[Token<'a>]) -> Result<Expression, AstError> {
     match &tokens[..] {
         [Token::Boolean(bool)] => Ok(Expression::StaticValue(Value::Boolean(*bool))),
         [Token::Integer(number)] => Ok(Expression::StaticValue(Value::Number(*number))),
+        [Token::Identifier(name)] => Ok(Expression::Variable(name.to_string())),
         [Token::Open, Token::Close] => Ok(Expression::Empty),
         [Token::Open, Token::Identifier("define"), Token::Identifier(ident), .., Token::Close] => {
             Ok(Expression::Definition(
