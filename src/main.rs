@@ -34,19 +34,26 @@ fn parse(lexer: Lexer, debug: bool) -> Result<Ast, AstError> {
     let ast = builder.build()?;
 
     if debug {
-        println!("ast: {:?}", ast)
+        println!("ast: {:?}\n", ast)
     }
 
     Ok(ast)
 }
 
 fn compile(ast: Ast, debug: bool) -> Result<Vec<Chunk>, CompileError> {
-    let mut compiler = Compiler::new();
+    let compiler = Compiler::new();
     let chunks = compiler.compile(ast)?;
 
     if debug {
+        println!("bytecode:");
+
         for chunk in chunks.iter() {
-            println!("chunk: {:?}", chunk)
+            print!("[{}]: ", chunk.id);
+            for op in &chunk.code {
+                println!("{:?}", op);
+                print!("     ");
+            }
+            println!("")
         }
     }
 
